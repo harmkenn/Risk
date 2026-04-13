@@ -14,6 +14,16 @@ TERRITORIES = {
 
 INITIAL_ARMIES_PER_PLAYER = 20  # for this small map
 
+# Approximate label positions for each territory on the SVG
+TERRITORY_LABEL_POS = {
+    "Alpha": (150, 135),
+    "Bravo": (275, 175),
+    "Charlie": (190, 220),
+    "Delta": (380, 230),
+    "Echo": (295, 270),
+    "Foxtrot": (400, 320),
+}
+
 
 # ---------- RISK BATTLE LOGIC ----------
 
@@ -65,7 +75,6 @@ def simulate_attack_step(state, from_terr, to_terr):
     # Territory capture
     if territories[to_terr]["armies"] <= 0:
         territories[to_terr]["owner"] = att_owner
-        # Move at least 1 army, up to dice used or remaining-1
         move_armies = min(3, territories[from_terr]["armies"] - 1)
         if move_armies < 1:
             move_armies = 1
@@ -83,7 +92,6 @@ def init_game(num_players, player_names):
     terr_names = list(TERRITORIES.keys())
     random.shuffle(terr_names)
 
-    # Assign territories round-robin
     owners = [player_names[i % num_players] for i in range(len(terr_names))]
     for name, owner in zip(terr_names, owners):
         territories[name] = {
@@ -92,7 +100,6 @@ def init_game(num_players, player_names):
             "neighbors": TERRITORIES[name],
         }
 
-    # Remaining armies to place
     armies_to_place = {
         player: INITIAL_ARMIES_PER_PLAYER - sum(1 for o in owners if o == player)
         for player in player_names
@@ -106,6 +113,7 @@ def init_game(num_players, player_names):
         "armies_to_place": armies_to_place,
         "message": "",
         "winner": None,
+        "reinforced_this_turn": False,
     }
     return state
 
@@ -125,17 +133,57 @@ def check_winner(state):
 
 
 def calc_reinforcements(state, player):
-    # Simple rule: max(3, territories_owned // 3)
     terr_owned = sum(1 for t in state["territories"].values() if t["owner"] == player)
     return max(3, terr_owned // 3)
 
 
+# ---------- SVG MAP RENDERING ----------
+
+def render_svg_map(territories, current_player):
+    try:
+        with open("map.svg", "r") as f:
+            svg = f.read()
+    except FileNotFoundError:
+        st.error("map.svg not found in the app directory.")
+        return
+
+    owner_colors = {
+        current_player: "#4CAF50",  # current player: green
+        "Player 1": "#2196F3",
+        "Player 2": "#F44336",
+        "Player 3": "#9C27B0",
+        "Player 4": "#FF9800",
+    }
+
+    css_rules = []
+    for name, data in territories.items():
+        color = owner_colors.get(data["owner"], "#cccccc")
+        css_rules.append(f"#{name} {{ fill: {color}; stroke: black; stroke-width: 2px; }}")
+
+    style_block = "<style>" + " ".join(css_rules) + "</style>"
+    svg = svg.replace("<svg ", "<svg ")  # no-op, just to keep structure
+    svg = svg.replace(">", ">" + style_block, 1)
+
+    # Add army labels
+    label_elems = []
+    for name, data in territories.items():
+        if name in TERRITORY_LABEL_POS:
+            x, y = TERRITORY_LABEL_POS[name]
+            label_elems.append(
+                f'<text x="{x}" y="{y}" text-anchor="middle" '
+                f'font-size="16" font-family="Arial" fill="black">'
+                f'{data["armies"]}</text>'
+            )
+
+    svg = svg.replace("</svg>", "\n" + "\n".join(label_elems) + "\n</svg>")
+
+    st.markdown(svg, unsafe_allow_html=True)
+
+
 # ---------- STREAMLIT UI ----------
 
-st.set_page_config(page_title="Mini Risk Engine", layout="wide")
-st.title("Mini Risk-style Board Game (Streamlit)")
-
-# --- SESSION STATE INIT ---
+st.set_page_config(page_title="Mini Risk Engine with Map", layout="wide")
+st.title("Mini Risk-style Board Game (with SVG Map)")
 
 if "game_state" not in st.session_state:
     st.session_state.game_state = None
@@ -173,33 +221,37 @@ else:
             st.session_state.game_state = None
             st.rerun()
 
-    # --- MAIN BOARD VIEW ---
-
-    st.subheader("Board")
     territories = state["territories"]
+    current_player = get_current_player(state)
 
-    cols = st.columns(3)
-    terr_items = list(territories.items())
-    chunk_size = (len(terr_items) + 2) // 3
-
-    for col_idx, col in enumerate(cols):
-        with col:
-            for name, data in terr_items[col_idx * chunk_size:(col_idx + 1) * chunk_size]:
-                st.markdown(
-                    f"**{name}** — Owner: {data['owner']}, Armies: {data['armies']}  \n"
-                    f"Neighbors: {', '.join(data['neighbors'])}"
-                )
+    # --- MAP VIEW ---
+    st.subheader("Map")
+    render_svg_map(territories, current_player)
 
     st.markdown("---")
 
-    # --- PHASE LOGIC ---
+    # --- TEXT BOARD VIEW (for debugging / clarity) ---
+    with st.expander("Territory details"):
+        cols = st.columns(3)
+        terr_items = list(territories.items())
+        chunk_size = (len(terr_items) + 2) // 3
+
+        for col_idx, col in enumerate(cols):
+            with col:
+                for name, data in terr_items[col_idx * chunk_size:(col_idx + 1) * chunk_size]:
+                    st.markdown(
+                        f"**{name}** — Owner: {data['owner']}, Armies: {data['armies']}  \n"
+                        f"Neighbors: {', '.join(data['neighbors'])}"
+                    )
+
+    st.markdown("---")
 
     current_player = get_current_player(state)
 
     if state["winner"]:
         st.success(f"Game over! {state['winner']} controls all territories.")
     else:
-        # SETUP PHASE: place initial armies
+        # SETUP PHASE
         if state["phase"] == "setup":
             st.subheader("Setup phase: place initial armies")
 
@@ -219,10 +271,8 @@ else:
             else:
                 st.write("No armies left to place.")
                 if st.button("End setup turn"):
-                    # Check if all players finished setup
                     if all(v == 0 for v in state["armies_to_place"].values()):
                         state["phase"] = "reinforce"
-                        # Give first reinforcement to current player
                         reinf = calc_reinforcements(state, current_player)
                         state["armies_to_place"][current_player] = reinf
                     else:
@@ -235,8 +285,7 @@ else:
 
             remaining = state["armies_to_place"].get(current_player, 0)
             if remaining == 0:
-                # Assign new reinforcements and move to attack
-                if "reinforced_this_turn" not in state or not state["reinforced_this_turn"]:
+                if not state["reinforced_this_turn"]:
                     reinf = calc_reinforcements(state, current_player)
                     state["armies_to_place"][current_player] = reinf
                     state["reinforced_this_turn"] = True
@@ -321,6 +370,5 @@ else:
             if st.button("End turn"):
                 next_player(state)
                 state["phase"] = "reinforce"
-                # Clear reinforcement flag
                 state["reinforced_this_turn"] = False
                 st.rerun()
