@@ -155,7 +155,7 @@ if st.session_state.game_state is None:
 
     if st.button("Start game"):
         st.session_state.game_state = init_game(num_players, player_names)
-        st.experimental_rerun()
+        st.rerun()
 else:
     state = st.session_state.game_state
 
@@ -171,7 +171,7 @@ else:
 
         if st.button("Restart game"):
             st.session_state.game_state = None
-            st.experimental_rerun()
+            st.rerun()
 
     # --- MAIN BOARD VIEW ---
 
@@ -215,7 +215,7 @@ else:
                 if st.button("Place armies"):
                     territories[terr_choice]["armies"] += num_to_place
                     state["armies_to_place"][current_player] -= num_to_place
-                    st.experimental_rerun()
+                    st.rerun()
             else:
                 st.write("No armies left to place.")
                 if st.button("End setup turn"):
@@ -227,7 +227,7 @@ else:
                         state["armies_to_place"][current_player] = reinf
                     else:
                         next_player(state)
-                    st.experimental_rerun()
+                    st.rerun()
 
         # REINFORCE PHASE
         elif state["phase"] == "reinforce":
@@ -246,7 +246,7 @@ else:
                     if st.button("Proceed to attack phase"):
                         state["phase"] = "attack"
                         state["reinforced_this_turn"] = False
-                        st.experimental_rerun()
+                        st.rerun()
             else:
                 st.write(f"{current_player}, you have **{remaining}** reinforcements to place.")
                 owned_terr = [name for name, t in territories.items() if t["owner"] == current_player]
@@ -256,7 +256,7 @@ else:
                 if st.button("Place reinforcements"):
                     territories[terr_choice]["armies"] += num_to_place
                     state["armies_to_place"][current_player] -= num_to_place
-                    st.experimental_rerun()
+                    st.rerun()
 
         # ATTACK PHASE
         elif state["phase"] == "attack":
@@ -285,14 +285,14 @@ else:
                         else:
                             st.info(log)
                             check_winner(state)
-                            st.experimental_rerun()
+                            st.rerun()
                 else:
                     st.write("No enemy neighbors to attack from this territory.")
 
             st.markdown("----")
             if st.button("End attack phase"):
                 state["phase"] = "fortify"
-                st.experimental_rerun()
+                st.rerun()
 
         # FORTIFY PHASE
         elif state["phase"] == "fortify":
@@ -312,7 +312,7 @@ else:
                     if st.button("Move armies"):
                         territories[from_terr]["armies"] -= num_move
                         territories[to_terr]["armies"] += num_move
-                        st.experimental_rerun()
+                        st.rerun()
                 else:
                     st.write("Not enough armies to move (must leave at least 1 behind).")
             else:
@@ -323,4 +323,4 @@ else:
                 state["phase"] = "reinforce"
                 # Clear reinforcement flag
                 state["reinforced_this_turn"] = False
-                st.experimental_rerun()
+                st.rerun()
