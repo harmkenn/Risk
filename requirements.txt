@@ -1,0 +1,6 @@
+# pip install -r requirements.txt --break-system-packages
+folium
+streamlit
+plotly
+plotly_express
+geopandas

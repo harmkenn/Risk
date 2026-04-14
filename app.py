@@ -1,28 +1,44 @@
 import random
 import streamlit as st
+import json
+import pandas as pd
+import plotly.express as px
 
-# ---------- GAME DATA ----------
+# ---------- LOAD GEOJSON DATA ----------
+@st.cache_data
+def load_geojson():
+    with open("custom.geo.json", "r") as f:
+        return json.load(f)
 
-TERRITORIES = {
-    "Alpha": ["Bravo", "Charlie"],
-    "Bravo": ["Alpha", "Delta"],
-    "Charlie": ["Alpha", "Delta", "Echo"],
-    "Delta": ["Bravo", "Charlie", "Foxtrot"],
-    "Echo": ["Charlie", "Foxtrot"],
-    "Foxtrot": ["Delta", "Echo"],
-}
+geojson_data = load_geojson()
+
+# Extract continents as territories
+TERRITORIES = {}
+continent_countries = {}
+
+for feature in geojson_data["features"]:
+    continent = feature["properties"].get("continent", "Unknown")
+    country_name = feature["properties"]["name"]
+    
+    if continent not in ["Seven seas (open ocean)", "Antarctica"]:  # Exclude non-playable areas
+        if continent not in TERRITORIES:
+            TERRITORIES[continent] = []
+            continent_countries[continent] = []
+        continent_countries[continent].append(country_name)
+
+# For simplicity, each continent is a territory, and countries within are just visual
+# In a real implementation, you'd want more granular territories
+TERRITORIES = {continent: [] for continent in continent_countries.keys()}
+
+# Define continent connections (adjacent continents)
+TERRITORIES["North America"] = ["South America", "Europe", "Asia"]
+TERRITORIES["South America"] = ["North America", "Africa"]
+TERRITORIES["Europe"] = ["North America", "Asia", "Africa"]
+TERRITORIES["Africa"] = ["Europe", "South America", "Asia"]
+TERRITORIES["Asia"] = ["Europe", "Africa", "North America", "Oceania"]
+TERRITORIES["Oceania"] = ["Asia"]
 
 INITIAL_ARMIES_PER_PLAYER = 20  # for this small map
-
-# Approximate label positions for each territory on the SVG
-TERRITORY_LABEL_POS = {
-    "Alpha": (150, 135),
-    "Bravo": (275, 175),
-    "Charlie": (190, 220),
-    "Delta": (380, 230),
-    "Echo": (295, 270),
-    "Foxtrot": (400, 320),
-}
 
 
 # ---------- RISK BATTLE LOGIC ----------
@@ -137,53 +153,73 @@ def calc_reinforcements(state, player):
     return max(3, terr_owned // 3)
 
 
-# ---------- SVG MAP RENDERING ----------
+# ---------- PLOTLY MAP RENDERING ----------
 
-def render_svg_map(territories, current_player):
-    try:
-        with open("map.svg", "r") as f:
-            svg = f.read()
-    except FileNotFoundError:
-        st.error("map.svg not found in the app directory.")
-        return
-
+def render_world_map(territories, current_player):
+    # Create a dataframe for the choropleth
+    countries_data = []
+    for continent, countries in continent_countries.items():
+        owner = territories.get(continent, {}).get("owner", "Neutral")
+        armies = territories.get(continent, {}).get("armies", 0)
+        for country in countries:
+            countries_data.append({
+                "country": country,
+                "continent": continent,
+                "owner": owner,
+                "armies": armies
+            })
+    
+    df = pd.DataFrame(countries_data)
+    
+    # Owner colors
     owner_colors = {
         current_player: "#4CAF50",  # current player: green
         "Player 1": "#2196F3",
-        "Player 2": "#F44336",
+        "Player 2": "#F44336", 
         "Player 3": "#9C27B0",
         "Player 4": "#FF9800",
+        "Neutral": "#cccccc"
     }
-
-    css_rules = []
-    for name, data in territories.items():
-        color = owner_colors.get(data["owner"], "#cccccc")
-        css_rules.append(f"#{name} {{ fill: {color}; stroke: black; stroke-width: 2px; }}")
-
-    style_block = "<style>" + " ".join(css_rules) + "</style>"
-    svg = svg.replace("<svg ", "<svg ")  # no-op, just to keep structure
-    svg = svg.replace(">", ">" + style_block, 1)
-
-    # Add army labels
-    label_elems = []
-    for name, data in territories.items():
-        if name in TERRITORY_LABEL_POS:
-            x, y = TERRITORY_LABEL_POS[name]
-            label_elems.append(
-                f'<text x="{x}" y="{y}" text-anchor="middle" '
-                f'font-size="16" font-family="Arial" fill="black">'
-                f'{data["armies"]}</text>'
-            )
-
-    svg = svg.replace("</svg>", "\n" + "\n".join(label_elems) + "\n</svg>")
-
-    st.markdown(svg, unsafe_allow_html=True)
+    
+    # Create choropleth map
+    try:
+        fig = px.choropleth(
+            df,
+            geojson=geojson_data,
+            locations="country",
+            featureidkey="properties.name",
+            color="owner",
+            color_discrete_map=owner_colors,
+            hover_name="country",
+            hover_data={"continent": True, "armies": True, "owner": True},
+            title="World Risk Map"
+        )
+        
+        fig.update_geos(
+            showcountries=True,
+            countrycolor="Black",
+            showland=True,
+            landcolor="lightgray"
+        )
+        
+        fig.update_layout(
+            height=500,
+            margin={"r":0,"t":40,"l":0,"b":0}
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error creating map: {e}")
+        # Fallback: show territory info as text
+        st.write("Territory ownership:")
+        for terr_name, terr_data in territories.items():
+            st.write(f"**{terr_name}**: {terr_data['owner']} ({terr_data['armies']} armies)")
 
 
 # ---------- STREAMLIT UI ----------
 
-st.set_page_config(page_title="Mini Risk Engine with Map", layout="wide")
-st.title("Mini Risk-style Board Game (with SVG Map)")
+st.set_page_config(page_title="World Risk Game", layout="wide")
+st.title("World Risk-style Board Game")
 
 if "game_state" not in st.session_state:
     st.session_state.game_state = None
@@ -226,7 +262,7 @@ else:
 
     # --- MAP VIEW ---
     st.subheader("Map")
-    render_svg_map(territories, current_player)
+    render_world_map(territories, current_player)
 
     st.markdown("---")
 
